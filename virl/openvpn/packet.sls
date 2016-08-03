@@ -2,20 +2,35 @@
 {% set openvpn_enable = salt['pillar.get']('virl:openvpn_enable', salt['grains.get']('openvpn_enable', False)) %}
 {% set public_port = salt['pillar.get']('virl:public_port', salt['grains.get']('public_port', 'eth0')) %}
 
+{% set l2_address = salt['pillar.get']('virl:l2_address', salt['grains.get']('l2_address', '172.16.1.254/24' )).split('/')[0] %}
+{% set l2_cidr_network = salt['pillar.get']('virl:l2_network', salt['grains.get']('l2_network', '172.16.1.0/24' )) %}
+{% set l2_network = l2_cidr_network.split('/')[0] %}
+{% set l2_mask = salt['pillar.get']('virl:l2_mask', salt['grains.get']('l2_mask', '255.255.255.0' )) %}
+
+{% set l2_address2 = salt['pillar.get']('virl:l2_address2', salt['grains.get']('l2_address2', '172.16.2.254/24' )).split('/')[0] %}
+{% set l2_cidr_network2 = salt['pillar.get']('virl:l2_network2', salt['grains.get']('l2_network2', '172.16.2.0/24' )) %}
+{% set l2_network2 = l2_cidr_network2.split('/')[0] %}
+{% set l2_mask2 = salt['pillar.get']('virl:l2_mask2', salt['grains.get']('l2_mask2', '255.255.255.0' )) %}
+
+{% set l3_address = salt['pillar.get']('virl:l3_address', salt['grains.get']('l3_address', '172.16.3.254/24' )).split('/')[0] %}
+{% set l3_cidr_network = salt['pillar.get']('virl:l3_network', salt['grains.get']('l3_network', '172.16.3.0/24' )) %}
+{% set l3_network = l3_cidr_network.split('/')[0] %}
+{% set l3_mask = salt['pillar.get']('virl:l3_mask', salt['grains.get']('l3_mask', '255.255.255.0' )) %}
+
 {% if openvpn_enable %}
 
 vpn maximize:
   cmd.run:
     - names:
-      - crudini --set /etc/virl.ini DEFAULT l2_network_gateway 172.16.11.254
-      - crudini --set /etc/virl.ini DEFAULT l2_network_gateway2 172.16.2.254
-      - crudini --set /etc/virl.ini DEFAULT l3_network_gateway 172.16.3.254
-      - crudini --set /etc/virl/virl.cfg env virl_local_ip 172.16.11.254
-      - crudini --set /etc/nova/nova.conf serial_console proxyclient_address 172.16.11.254
-      - crudini --set /etc/nova/nova.conf DEFAULT serial_port_proxyclient_address 172.16.11.254
-      - neutron --os-tenant-name admin --os-username admin --os-password {{ ospassword }} --os-auth-url=http://127.0.1.1:5000/v2.0 subnet-update flat --gateway_ip 172.16.11.254
-      - neutron --os-tenant-name admin --os-username admin --os-password {{ ospassword }} --os-auth-url=http://127.0.1.1:5000/v2.0 subnet-update flat1 --gateway_ip 172.16.2.254
-      - neutron --os-tenant-name admin --os-username admin --os-password {{ ospassword }} --os-auth-url=http://127.0.1.1:5000/v2.0 subnet-update ext-net --gateway_ip 172.16.3.254
+      - crudini --set /etc/virl.ini DEFAULT l2_network_gateway {{l2_address}}
+      - crudini --set /etc/virl.ini DEFAULT l2_network_gateway2 {{l2_address2}}
+      - crudini --set /etc/virl.ini DEFAULT l3_network_gateway {{l3_address}}
+      - crudini --set /etc/virl/virl.cfg env virl_local_ip {{l2_address}}
+      - crudini --set /etc/nova/nova.conf serial_console proxyclient_address {{l2_address}}
+      - crudini --set /etc/nova/nova.conf DEFAULT serial_port_proxyclient_address {{l2_address}}
+      - neutron --os-tenant-name admin --os-username admin --os-password {{ ospassword }} --os-auth-url=http://127.0.1.1:5000/v2.0 subnet-update flat --gateway_ip {{l2_address}}
+      - neutron --os-tenant-name admin --os-username admin --os-password {{ ospassword }} --os-auth-url=http://127.0.1.1:5000/v2.0 subnet-update flat1 --gateway_ip {{l2_address2}}
+      - neutron --os-tenant-name admin --os-username admin --os-password {{ ospassword }} --os-auth-url=http://127.0.1.1:5000/v2.0 subnet-update ext-net --gateway_ip {{l3_address}}
 
 ufw accepted ports:
   cmd.run:
@@ -46,7 +61,9 @@ ufw accept all:
 adding local route to openvpn:
   file.append:
     - name: /etc/openvpn/server.conf
-    - text: push "route 172.16.0.0 255.255.224.0 172.16.11.254"
+    - text: |
+        push "route {{l2_network2}} {{l2_mask2}} {{l2_address}}"
+        push "route {{l3_network}} {{l3_mask}} {{l2_address}}"
 
 adding nat to ufw:
   file.prepend:
@@ -55,7 +72,9 @@ adding nat to ufw:
         *nat
         :POSTROUTING ACCEPT [0:0]
         # translate outbound traffic from internal networks
-        -A POSTROUTING -s 172.16.0.0/19 -o {{ public_port }} -j MASQUERADE
+        -A POSTROUTING -s {{l2_cidr_network}} -o {{ public_port }} -j MASQUERADE
+        -A POSTROUTING -s {{l2_cidr_network2}} -o {{ public_port }} -j MASQUERADE
+        -A POSTROUTING -s {{l3_cidr_network}} -o {{ public_port }} -j MASQUERADE
         # don't delete the 'COMMIT' line or these nat table rules won't
         # be processed
         COMMIT
